@@ -99,20 +99,23 @@ hi-llm add && hi-llm sync         # thêm provider mới → mọi harness dùng
 eval $(hi-llm env deeprelay)      # script/CLI bất kỳ dùng provider này
 ```
 
-## Cấu trúc repo
+## Cấu trúc repo (monorepo `hi-tools` — module Go chung ở gốc)
 
 ```
-hi-llm/
-├── cmd/hi-llm/       # main.go, dispatch subcommand
+hi-tools/
+├── go.mod                    # module hi-tools
+├── Makefile                  # make build/install (mọi binary trong cmd/)
+├── cmd/hi-llm/               # main.go, dispatch subcommand
 ├── internal/
-│   ├── registry/     # providers.yaml, resolve con trỏ key
-│   ├── keystore/     # interface + backend enc (mặc định), env, plain, keychain
-│   ├── provider/     # client /v1/models, ping, cache TTL
-│   └── harness/      # interface + adapter opencode, commandcode
-├── go.mod
-├── Makefile          # build (./bin), install ($GOBIN)
-├── README.md
-└── SPEC-phase1.md    # spec Phase 1 (đầu vào cho my-flow)
+│   ├── llm/
+│   │   ├── registry/         # providers.yaml, resolve con trỏ key
+│   │   ├── keystore/         # interface + backend enc (mặc định), env, plain, keychain
+│   │   ├── provider/         # client /v1/models, ping, cache TTL
+│   │   └── harness/          # interface + adapter opencode, commandcode (phase 3)
+│   └── hix/                  # hạ tầng CLI dùng chung giữa các tool
+└── hi-llm/                   # docs của tool này
+    ├── README.md
+    └── SPEC-phase1.md        # spec Phase 1 (đầu vào cho my-flow)
 ```
 
 ## Lộ trình
@@ -128,7 +131,10 @@ Phạm vi relay hiện tại: chỉ OpenAI-compatible `/v1/models`; format khác
 
 ## Build & install
 
+Chạy từ gốc repo `hi-tools/` (Makefile chung):
+
 ```sh
-make build    # build binary vào ./bin
-make install  # copy vào $GOBIN
+make build           # build mọi binary vào ./bin
+make install         # copy vào $GOBIN
+make build hi-llm    # chỉ build tool này
 ```

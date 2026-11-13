@@ -27,17 +27,22 @@ Ghi nhận → Tổ chức → Tìm kiếm → Ôn luyện → Digest
 
 Chi tiết Phase 1: xem [SPEC-phase1.md](SPEC-phase1.md).
 
-## Cấu trúc repo dự kiến
+## Cấu trúc repo (monorepo `hi-tools` — module Go chung ở gốc)
 
 ```
-hi-brains/
-├── cmd/              # main.go, các subcommand
+hi-tools/
+├── go.mod                    # module hi-tools
+├── Makefile                  # make build/install (mọi binary trong cmd/)
+├── cmd/hi-brains/            # main.go, các subcommand
 ├── internal/
-│   ├── note/         # parse/serialize markdown + frontmatter YAML
-│   ├── store/        # đọc/ghi thư mục notes, index tag, đặt tên file
-│   └── search/       # gọi ripgrep + fzf qua shell
-├── go.mod            # module riêng
-└── Makefile          # make build / make install
+│   ├── brains/
+│   │   ├── note/             # parse/serialize markdown + frontmatter YAML
+│   │   ├── store/            # đọc/ghi thư mục notes, index tag, đặt tên file
+│   │   └── search/           # gọi ripgrep + fzf qua shell
+│   └── hix/                  # hạ tầng CLI dùng chung giữa các tool (fzf, $EDITOR, table...)
+└── hi-brains/                # docs của tool này
+    ├── README.md
+    └── SPEC-phase1.md
 ```
 
 ## Format note
@@ -72,7 +77,10 @@ Phase 2 sẽ bổ sung field `review` (ngày ôn kế tiếp) và `ease` (hệ s
 
 ## Build & install
 
+Chạy từ gốc repo `hi-tools/` (Makefile chung):
+
 ```sh
-make build    # build binary vào ./bin
-make install  # copy vào $GOBIN
+make build              # build mọi binary vào ./bin
+make install            # copy vào $GOBIN
+make build hi-brains    # chỉ build tool này
 ```

@@ -8,7 +8,10 @@
 
 Chưa làm trong Phase 1: `ping`, `use` (fzf), harness adapter (`sync`, `role`), health check định kỳ.
 
-Ngôn ngữ: **Go**. Repo: `hi-tools/hi-llm` (module Go riêng trong folder này).
+Ngôn ngữ: **Go**. Repo: `hi-tools` — monorepo, **module Go chung ở gốc** (`go.mod` đã có sẵn, module `hi-tools`).
+Code của tool này nằm ở `cmd/hi-llm/` + `internal/llm/`; hạ tầng CLI dùng chung với các tool
+khác (bảng kết quả có màu, đọc password ẩn ký tự, fzf...) đặt ở `internal/hix/` — phần nào
+dùng chung được thì viết vào `hix` thay vì duplicating.
 Chạy được trên macOS và Linux (không cgo, không phụ thuộc OS keystore ở đường mặc định).
 
 ## Phạm vi Phase 1
@@ -92,16 +95,18 @@ hi-llm add --name deeprelay --base-url https://.../v1 [--api-key-stdin] [--skip-
 ## Cấu trúc code
 
 ```
-hi-llm/
-├── cmd/hi-llm/main.go    # entrypoint, dispatch subcommand
+hi-tools/                        # gốc repo — go.mod chung (module hi-tools), Makefile chung đã có sẵn
+├── cmd/hi-llm/main.go           # entrypoint, dispatch subcommand (đã có placeholder)
 ├── internal/
-│   ├── registry/         # load/save providers.yaml, validate, resolve con trỏ key
-│   ├── keystore/         # KeyStore interface + encStore (argon2id+AES-GCM) + envStore + stub
-│   └── provider/         # client /models (stdlib net/http), cache JSON + TTL
-├── go.mod
-├── Makefile              # build (./bin), install ($GOBIN)
-└── README.md             # cập nhật usage Phase 1
+│   ├── llm/
+│   │   ├── registry/            # load/save providers.yaml, validate, resolve con trỏ key
+│   │   ├── keystore/            # KeyStore interface + encStore (argon2id+AES-GCM) + envStore + stub
+│   │   └── provider/            # client /models (stdlib net/http), cache JSON + TTL
+│   └── hix/                     # hạ tầng CLI dùng chung — đã có doc.go
+└── hi-llm/README.md             # cập nhật usage Phase 1
 ```
+
+Import path dạng `hi-tools/internal/llm/registry`, `hi-tools/internal/hix`.
 
 - CLI parsing: stdlib `flag` + subcommand dispatch (đồng bộ lựa chọn với hi-brains; nếu hi-brains dùng cobra thì theo cobra).
 - YAML: `gopkg.in/yaml.v3`. Crypto: `golang.org/x/crypto/argon2`, `golang.org/x/term`. HTTP: stdlib.
@@ -118,11 +123,11 @@ verify: go build ./... && go vet ./... && go test ./...
 
 ## Tasks gợi ý (1-5 task, đúng ràng buộc của flow)
 
-- [ ] Khởi tạo module Go + skeleton CLI (subcommand dispatch) + package `registry`: load/save/validate `providers.yaml`, con trỏ key
+- [ ] Skeleton CLI trong `cmd/hi-llm` (subcommand dispatch; go.mod + Makefile đã có sẵn ở gốc repo) + package `registry`: load/save/validate `providers.yaml`, con trỏ key
 - [ ] Package `keystore`: interface + `encStore` (master password qua x/term hoặc env, argon2id + AES-GCM, ghi atomic, không ghi đè khi sai password) + `envStore` + stub plain/keychain
 - [ ] Lệnh `add`: wizard + flags không interactive, validate name/base_url, lưu key, gọi thử `GET /models` xác minh (có `--skip-verify`)
 - [ ] Package `provider` + lệnh `models` (cache JSON TTL 1h, `--refresh`, `--json`, gộp mọi provider) và lệnh `ls` (bảng trạng thái, không lộ secret)
-- [ ] Lệnh `env` (`--style openai|anthropic`, resolve keystore lúc chạy) + unit test các package + Makefile build/install + cập nhật README
+- [ ] Lệnh `env` (`--style openai|anthropic`, resolve keystore lúc chạy) + unit test các package + cập nhật README (Makefile chung đã có sẵn ở gốc)
 
 ## Ngoài phạm vi (để phase sau)
 

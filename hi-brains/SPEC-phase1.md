@@ -6,7 +6,10 @@
 Phase 1 xây phần lõi: ghi note dạng markdown + frontmatter YAML vào thư mục git, tìm kiếm
 nhanh bằng ripgrep/fzf. Chưa làm spaced repetition, digest, kata, import note cũ, RSS.
 
-Ngôn ngữ: **Go**. Repo: `hi-tools/hi-brains` (module Go riêng trong folder này).
+Ngôn ngữ: **Go**. Repo: `hi-tools` — monorepo, **module Go chung ở gốc** (`go.mod` đã có sẵn, module `hi-tools`).
+Code của tool này nằm ở `cmd/hi-brains/` + `internal/brains/`; hạ tầng CLI dùng chung với
+các tool khác (fzf wrapper, mở `$EDITOR`, bảng kết quả có màu...) đặt ở `internal/hix/` —
+phần nào dùng chung được thì viết vào `hix` thay vì duplicating.
 
 ## Phạm vi Phase 1
 
@@ -56,16 +59,18 @@ hi-brains add --quick "redis timeout: tăng pool + dial timeout" --tags redis,go
 ## Cấu trúc code
 
 ```
-hi-brains/
-├── cmd/hi-brains/main.go   # entrypoint, dispatch subcommand
+hi-tools/                           # gốc repo — go.mod chung (module hi-tools), Makefile chung đã có sẵn
+├── cmd/hi-brains/main.go           # entrypoint, dispatch subcommand (đã có placeholder)
 ├── internal/
-│   ├── note/               # type Note, parse & serialize markdown + frontmatter YAML
-│   ├── store/              # mở thư mục notes (BRAINS_DIR), CRUD file, sinh slug/tên file
-│   └── search/             # wrapper ripgrep + fzf (exec.Command), parse output
-├── go.mod
-├── Makefile                # build (./bin), install ($GOBIN)
-└── README.md               # cập nhật mục "Build & install" + usage Phase 1
+│   ├── brains/
+│   │   ├── note/                   # type Note, parse & serialize markdown + frontmatter YAML
+│   │   ├── store/                  # mở thư mục notes (BRAINS_DIR), CRUD file, sinh slug/tên file
+│   │   └── search/                 # wrapper ripgrep + fzf (exec.Command), parse output
+│   └── hix/                        # hạ tầng CLI dùng chung (fzf, $EDITOR, table...) — đã có doc.go
+└── hi-brains/README.md             # cập nhật usage Phase 1
 ```
+
+Import path dạng `hi-tools/internal/brains/note`, `hi-tools/internal/hix`.
 
 - CLI parsing: dùng stdlib `flag` với subcommand dispatch, hoặc `spf13/cobra` — chọn 1, nhất quán.
 - YAML: `gopkg.in/yaml.v3`. Giữ field lạ trong frontmatter khi ghi lại (map thay vì struct cứng, hoặc `yaml:",inline"` map).
@@ -82,11 +87,11 @@ verify: go build ./... && go vet ./... && go test ./...
 
 ## Tasks gợi ý (1-5 task, đúng ràng buộc của flow)
 
-- [ ] Khởi tạo module Go + skeleton CLI (subcommand dispatch) + lệnh `init` (tạo thư mục notes, git init)
+- [ ] Skeleton CLI trong `cmd/hi-brains` (subcommand dispatch; go.mod + Makefile đã có sẵn ở gốc repo) + lệnh `init` (tạo thư mục notes, git init)
 - [ ] Package `note` + `store`: parse/serialize markdown + frontmatter YAML (giữ field lạ), sinh tên file `YYYY-MM-DD-slug.md`
 - [ ] Lệnh `add`: template theo type, prompt chọn type, `--quick`, `--tags`, mở `$EDITOR`, huỷ khi nội dung rỗng
 - [ ] Lệnh `search` (ripgrep, fzf interactive khi không có query) và `list` (`--tag`, `--type`, `--recent`) + bảng kết quả
-- [ ] Unit test cho note/store/search-filter + Makefile build/install + cập nhật README usage
+- [ ] Unit test cho note/store/search-filter + cập nhật README usage (Makefile chung đã có sẵn ở gốc)
 
 ## Ngoài phạm vi (để phase sau)
 
