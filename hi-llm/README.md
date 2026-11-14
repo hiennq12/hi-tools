@@ -74,6 +74,8 @@ Các backend phụ (hỗ trợ, không mặc định):
 
 ## Usage Phase 1
 
+> Hướng dẫn từng bước + tra cứu lệnh + xử lý lỗi: [guides/hi-llm/](../guides/hi-llm/README.md)
+
 ```sh
 # Thêm provider. Có TTY thì hỏi lần lượt; không có TTY thì phải truyền flag:
 hi-llm add --name deeprelay --base-url https://relay.example/v1 --api-key-stdin
