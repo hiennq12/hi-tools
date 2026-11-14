@@ -94,6 +94,9 @@ func (r *Registry) Validate() error {
 		if p.Kind != "openai" {
 			return fmt.Errorf("provider %q: kind %q không hỗ trợ (chỉ nhận openai)", name, p.Kind)
 		}
+		if _, err := NormalizeBaseURL(p.BaseURL); err != nil {
+			return fmt.Errorf("provider %q: %w", name, err)
+		}
 		if err := ValidPointer(p.APIKey); err != nil {
 			return fmt.Errorf("provider %q: %w", name, err)
 		}
