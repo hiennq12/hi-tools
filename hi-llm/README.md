@@ -46,7 +46,7 @@ defaults:
 ## Lưu API key — backend `enc` (mặc định)
 
 - File `~/.config/hi-llm/keys.enc`: AES-GCM, khoá dẫn xuất từ **master password** bằng argon2id — thuần Go, không cgo, chạy được cả macOS lẫn Ubuntu/VPS.
-- Master password hỏi qua terminal (ẩn ký tự, `golang.org/x/term`), cache trong session để không hỏi lại mỗi lệnh.
+- Master password hỏi qua terminal (ẩn ký tự, `golang.org/x/term`) hoặc lấy từ env `HI_LLM_MASTER_PASSWORD`; cache trong session để không hỏi lại mỗi lệnh (phase sau).
 - Sai password → giải mã fail → báo lỗi rõ, không ghi đè.
 - `providers.yaml` chỉ chứa *con trỏ*, copy cả thư mục config sang máy khác là dùng được.
 
@@ -66,7 +66,7 @@ Các backend phụ (hỗ trợ, không mặc định):
 | 1 | `hi-llm add` | wizard thêm provider: tên → base_url → dán key → master password → gọi thử `/v1/models` xác nhận → ghi registry |
 | 1 | `hi-llm ls` | bảng tổng quan: provider, loại, số model (cache), key hợp lệ?, ping lần cuối |
 | 1 | `hi-llm models [provider]` | gọi `{base_url}/models`, cache TTL, in bảng hoặc mở fzf |
-| 1 | `hi-llm env <provider>` | in `export ...` (OPENAI_API_KEY/BASE_URL hoặc ANTHROPIC_*) → `eval $(hi-llm env deeprelay)` |
+| 1 | `hi-llm env <provider>` | in `export ...` (OPENAI_API_KEY/BASE_URL hoặc ANTHROPIC_*) → `eval "$(hi-llm env deeprelay)"` |
 | 2 | `hi-llm ping [provider\|all]` | health check mỗi provider (request tí hon), ✅/❌ + độ trễ + lỗi quota/auth |
 | 2 | `hi-llm use` | fzf 2 bước: chọn provider → chọn model → ghi vào nơi tiêu thụ được chọn |
 | 3 | `hi-llm sync [harness]` | sinh config harness từ registry (không tham số = tất cả) |
@@ -96,7 +96,7 @@ hi-llm role review                # role quan trọng → model mạnh
 flow new my-feature "..."         # my-flow đọc roles.conf
 
 hi-llm add && hi-llm sync         # thêm provider mới → mọi harness dùng được ngay
-eval $(hi-llm env deeprelay)      # script/CLI bất kỳ dùng provider này
+eval "$(hi-llm env deeprelay)"      # script/CLI bất kỳ dùng provider này
 ```
 
 ## Cấu trúc repo (monorepo `hi-tools` — module Go chung ở gốc)
