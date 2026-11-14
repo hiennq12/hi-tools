@@ -20,6 +20,8 @@
 | `--refresh/--ttl chỉ dùng kèm provider` | `hi-llm models --refresh` không có tên | `hi-llm models <provider> --refresh` |
 | `.../providers.yaml: yaml không hợp lệ: yaml: line N: ...` (hoặc lỗi validate kèm đường dẫn) | sửa tay yaml sai cú pháp / sai quy tắc | mở file theo đường dẫn trong lỗi, sửa dòng N |
 | `ls` hiện `enc 🔒` | bình thường — `ls` không hỏi password | `HI_LLM_MASTER_PASSWORD=... hi-llm ls` để kiểm key |
+| (curl sau `env`) `MissingSessionID ... x-opencode-session` | provider **opencode-go** bắt buộc header session — không phải lỗi hi-llm | thêm `-H "x-opencode-session: $(uuidgen)"` vào curl |
+| (curl sau `env`) `content: null`, `finish_reason: "length"` | model có reasoning tiêu hết `max_tokens` để nghĩ | tăng `max_tokens` (vd 200+) |
 
 ## Các việc chưa có lệnh (làm tay)
 

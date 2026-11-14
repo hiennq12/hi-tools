@@ -46,6 +46,11 @@ make build hi-llm && make install     # → $GOBIN/hi-llm
 hi-llm                                # in usage = cài thành công
 ```
 
+- `make ...` phải chạy ở **gốc repo** `hi-tools/` (nơi có `Makefile`, `go.mod`).
+- Sau `make install`, lệnh `hi-llm` chạy được **ở bất kỳ thư mục nào** (`~/go/bin` có trong PATH);
+  tool không phụ thuộc thư mục hiện tại — luôn đọc `~/.config/hi-llm/` và `~/.cache/hi-llm/`.
+- Sửa code xong → chạy lại `make install` để cập nhật binary.
+
 ## 2. Thêm provider đầu tiên
 
 Gõ `hi-llm add` trong terminal, wizard hỏi lần lượt:
