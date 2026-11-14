@@ -27,7 +27,10 @@ Chạy được trên macOS và Linux (không cgo, không phụ thuộc OS keyst
   - `HI_LLM_CACHE_DIR`: thư mục cache (mặc định `~/.cache/hi-llm/`).
   - `HI_LLM_MASTER_PASSWORD`: master password không interactive.
 - Thư mục config tạo với quyền `0700`. Mọi file ghi ra (`providers.yaml`, `keys.enc`, cache) đều ghi
-  atomic: file tạm cùng thư mục + `rename`. `keys.enc` quyền `0600`.
+  atomic: file tạm cùng thư mục + `rename`; **thư mục cha chưa có thì tự tạo** (`MkdirAll` `0700`) —
+  lần chạy đầu trên máy sạch không được lỗi ENOENT. `keys.enc` quyền `0600`.
+- Flag đặt trước hay sau tham số vị trí đều được: `hi-llm models deeprelay --refresh` ≡
+  `hi-llm models --refresh deeprelay` (stdlib `flag` dừng ở positional đầu tiên → phải tự gom flag còn lại).
 - HTTP: stdlib `net/http`, timeout 15s; không network ngoài `GET {base_url}/models`.
 - Lỗi in ra stderr, không panic. **Không in secret** ra stdout/stderr, trừ lệnh `env`.
 
@@ -44,8 +47,6 @@ providers:
 subscriptions:
   claude: { harness: claude }
   agy:    { harness: agy }
-defaults:
-  chat: opencode-go/qwen3.8-max
 ```
 
 - Tên provider/subscription khớp regex `^[a-z0-9][a-z0-9._-]*$` (không `/`, không `..` — tên còn dùng
@@ -77,6 +78,7 @@ type KeyStore interface {
   **không ghi đè file**.
 - Ghi key mới: đọc file cũ (nếu có) → giải mã → thêm/cập nhật entry → mã hoá lại toàn bộ → ghi atomic.
 - `Get` tên không có trong file → lỗi `không có key '<name>' trong keys.enc`.
+- `Get` khi `keys.enc` chưa tồn tại → lỗi `chưa có keys.enc, chạy hi-llm add` (không phải lỗi sai password).
 - Backend `env:<VAR>`: đọc `os.Getenv`; rỗng → lỗi `biến môi trường <VAR> chưa đặt`. `Set` → lỗi (read-only).
 - Backend `plain:<name>` và `keychain:<name>`: stub, mọi method trả lỗi `chưa hỗ trợ ở phase 1`.
 - Hàm resolve con trỏ `Resolve(pointer string) (string, error)` chọn backend theo tiền tố.
@@ -91,7 +93,8 @@ hi-llm add [--name N] [--base-url URL] [--kind openai]
 - Có TTY và thiếu giá trị: hỏi lần lượt name, base_url, cách lưu key (dán key → `enc`, hoặc tên env var → `env`),
   dán apikey (ẩn ký tự). Không có TTY: thiếu giá trị → lỗi (xem Quy tắc chung).
 - `--api-key-stdin`: đọc key từ stdin (dòng đầu, trim) → lưu `enc:<name>`.
-- `--api-key-env VAR`: lưu con trỏ `env:VAR`, không ghi keystore.
+- `--api-key-env VAR`: lưu con trỏ `env:VAR`, không ghi keystore (không tạo `keys.enc`).
+- `--api-key-stdin` và `--api-key-env` loại trừ nhau → truyền cả hai là lỗi.
 - Validate:
   - name đúng regex; trùng provider đã có → có TTY thì hỏi ghi đè, không TTY thì cần `--force`, thiếu → lỗi.
   - base_url là URL `http`/`https` có host; path rỗng hoặc `/` → tự nối `/v1`; bỏ `/` cuối.
@@ -102,14 +105,13 @@ hi-llm add [--name N] [--base-url URL] [--kind openai]
 
 ### 2. `hi-llm ls`
 
-- Bảng: `NAME | KIND | BASE_URL | KEY | MODELS | DEFAULT`.
+- Bảng: `NAME | KIND | BASE_URL | KEY | MODELS`.
   - `KEY`: loại con trỏ + trạng thái:
     - `env:FOO ✅` / `env:FOO ❌ thiếu`.
     - `enc`: **`ls` không bao giờ hỏi password**. Có `HI_LLM_MASTER_PASSWORD` → giải mã và hiện `enc ✅` /
-      `enc ❌` (không có key hoặc sai password); không có env → `enc 🔒`.
+      `enc ❌` (không có key, chưa có `keys.enc`, hoặc sai password); không có env → `enc 🔒`.
     - `plain`/`keychain`: `<loại> ❌ chưa hỗ trợ`.
   - `MODELS`: số model theo cache + tuổi cache (vd `42 (5m)`); chưa có cache → `-`.
-  - `DEFAULT`: tên các mục `defaults` có giá trị bắt đầu bằng `<NAME>/` (vd `chat`), không có → trống.
 - Liệt kê cả `subscriptions`: KIND=`sub`, BASE_URL là tên harness, KEY và MODELS là `-`.
 - Sắp theo tên. Registry rỗng → in hướng dẫn `hi-llm add`, exit 0.
 
@@ -120,7 +122,8 @@ hi-llm add [--name N] [--base-url URL] [--kind openai]
   rồi ghi cache. Cache lưu `fetched_at` + danh sách model.
 - Parse response chuẩn OpenAI: `{"data":[{"id":"...", ...}]}`; thiếu `data` → lỗi rõ.
 - Không `provider`: gộp models của mọi provider trong registry **chỉ từ cache** (không gọi mạng, bỏ qua hạn TTL);
-  bỏ qua subscriptions; provider chưa có cache → cảnh báo stderr.
+  bỏ qua subscriptions; provider chưa có cache → cảnh báo stderr; exit 0 kể cả khi mọi provider thiếu cache.
+  `--refresh`/`--ttl` mà không có `provider` → lỗi `--refresh/--ttl chỉ dùng kèm provider`.
 - Output mặc định: `provider/model-id` mỗi dòng, sắp xếp (format dùng ngay cho `opencode run -m`);
   `--json` in mảng `[{"provider":..., "id":...}]`.
 - Provider không tồn tại hoặc là subscription → lỗi. Gọi mạng lỗi (timeout, 401...) → cảnh báo stderr
@@ -131,7 +134,7 @@ hi-llm add [--name N] [--base-url URL] [--kind openai]
 - In ra stdout các dòng để `eval "$(hi-llm env deeprelay)"`:
   - `--style openai` (mặc định): `OPENAI_API_KEY`, `OPENAI_BASE_URL` (= `base_url`).
   - `--style anthropic`: `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` (= `base_url` **bỏ `/v1` ở cuối**,
-    vì SDK Anthropic tự nối `/v1/messages`).
+    vì SDK Anthropic tự nối `/v1/messages`; không kết thúc bằng `/v1` → giữ nguyên).
 - Mọi giá trị đặt trong nháy đơn, nháy đơn bên trong thoát thành `'\''`:
   `export OPENAI_API_KEY='sk-...'`.
 - Secret resolve từ keystore lúc chạy; đây là lệnh duy nhất được in secret (ra stdout).
@@ -169,10 +172,13 @@ Import path dạng `hi-tools/internal/llm/registry`, `hi-tools/internal/hix`.
   `eval "$(hi-llm env deeprelay)"` và curl thử thành công.
 - `keys.enc` mở bằng text editor chỉ thấy binary rác; `providers.yaml` không chứa secret.
 - Unit test (không network thật — dùng `httptest`; không đụng `~` — dùng `t.TempDir()` + các env `HI_LLM_*`):
-  vòng đời encStore (tạo / sai password không ghi đè / thêm key / file hỏng / salt-nonce mới mỗi lần ghi),
+  vòng đời encStore (tạo / sai password không ghi đè / thêm key / file hỏng / salt-nonce mới mỗi lần ghi /
+  `keys.enc` chưa có → lỗi riêng / ghi vào thư mục chưa tồn tại),
   parse + validate registry (tên sai regex, kind lạ, con trỏ lạ), resolve `env:`, cache TTL + `--refresh`,
-  parse response `/models`, `add` không TTY (thiếu giá trị → lỗi, trùng tên cần `--force`, verify fail không ghi),
-  `ls` không lộ secret, output `env` cả 2 style (quoting, bỏ `/v1` cho anthropic).
+  parse response `/models`, `add` không TTY (thiếu giá trị → lỗi, trùng tên cần `--force`, verify fail không ghi,
+  `--api-key-env` ghi `env:VAR` không tạo `keys.enc`, `--skip-verify` không gọi mạng, `--api-key-stdin` + `--api-key-env` → lỗi),
+  flag đặt sau tham số vị trí (`models <p> --refresh`, `env <p> --style anthropic`), `models` gộp + `--refresh` → lỗi,
+  `ls` không lộ secret, output `env` cả 2 style (quoting, bỏ `/v1` cho anthropic, URL không có `/v1` giữ nguyên).
 - `go vet` sạch, `go test ./...` pass.
 
 verify: go build ./... && go vet ./... && go test ./...
@@ -188,5 +194,5 @@ verify: go build ./... && go vet ./... && go test ./...
 ## Ngoài phạm vi (để phase sau)
 
 `ping` health check, `use` với fzf, harness adapter (`sync opencode`, `sync commandcode`), `role` cho my-flow,
-backend `plain`/`keychain` hoàn chỉnh, cache master password trong session, cảnh báo quota,
+backend `plain`/`keychain` hoàn chỉnh, cache master password trong session, mục `defaults` (model mặc định theo mục đích, làm cùng `use`), cảnh báo quota,
 format API không phải OpenAI-compatible, lệnh xoá/sửa provider.
