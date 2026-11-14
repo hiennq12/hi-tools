@@ -38,6 +38,9 @@ var ErrNoKeysFile = errors.New("chưa có keys.enc, chạy hi-llm add")
 // ErrNoPassword trả về khi không có env và cũng không có terminal để hỏi.
 var ErrNoPassword = errors.New("cần HI_LLM_MASTER_PASSWORD hoặc terminal để nhập master password")
 
+// ErrEmptyPassword trả về khi master password rỗng lúc tạo keys.enc mới.
+var ErrEmptyPassword = errors.New("master password không được rỗng")
+
 // PasswordFunc trả về master password; confirm=true khi keys.enc được tạo mới.
 type PasswordFunc func(confirm bool) (string, error)
 
@@ -208,6 +211,9 @@ func (s *EncStore) Set(name, secret string) error {
 		if err != nil {
 			return err
 		}
+		if pw == "" {
+			return ErrEmptyPassword
+		}
 	default:
 		return err
 	}
@@ -252,6 +258,9 @@ func PromptPassword(stdin io.Reader, stderr io.Writer) PasswordFunc {
 			return "", err
 		}
 		if confirm {
+			if pw == "" {
+				return "", ErrEmptyPassword
+			}
 			again, err := hix.ReadPassword("Nhập lại master password: ", stdin, stderr)
 			if err != nil {
 				return "", err
