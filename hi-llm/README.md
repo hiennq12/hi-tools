@@ -72,6 +72,32 @@ Các backend phụ (hỗ trợ, không mặc định):
 | 3 | `hi-llm sync [harness]` | sinh config harness từ registry (không tham số = tất cả) |
 | 3 | `hi-llm role <role> [provider/model]` | cập nhật dòng role trong my-flow `roles.conf` |
 
+## Usage Phase 1
+
+```sh
+# Thêm provider. Có TTY thì hỏi lần lượt; không có TTY thì phải truyền flag:
+hi-llm add --name deeprelay --base-url https://relay.example/v1 --api-key-stdin
+hi-llm add --name opencode-go --base-url https://relay.example/v1 \
+  --api-key-env OPENCODE_API_KEY
+hi-llm add --name deeprelay --base-url https://relay.example/v1 \
+  --api-key-stdin --force --skip-verify        # ghi đè, không gọi thử /models
+
+HI_LLM_MASTER_PASSWORD=... hi-llm ls           # bảng NAME/KIND/BASE_URL/KEY/MODELS
+hi-llm models                                  # gộp model của mọi provider từ cache
+hi-llm models deeprelay --refresh              # gọi lại GET {base_url}/models
+hi-llm models deeprelay --ttl 10m --json       # đổi TTL cache, in JSON
+
+eval "$(hi-llm env deeprelay)"                   # OPENAI_API_KEY / OPENAI_BASE_URL
+eval "$(hi-llm env deeprelay --style anthropic)" # ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL
+```
+
+- `HI_LLM_HOME` (mặc định `~/.config/hi-llm`), `HI_LLM_CACHE_DIR` (mặc định `~/.cache/hi-llm`),
+  `HI_LLM_MASTER_PASSWORD` cho chế độ không tương tác. Không có TTY mà thiếu giá trị → báo lỗi, không treo.
+- `--api-key-stdin` lưu key vào `keys.enc` dưới con trỏ `enc:<name>`; `--api-key-env VAR` chỉ ghi
+  con trỏ `env:VAR`, không tạo `keys.enc`.
+- `ls` không bao giờ hỏi master password: có `HI_LLM_MASTER_PASSWORD` thì hiện `enc ✅`/`enc ❌`,
+  không có thì `enc 🔒`.
+
 ## Harness adapter (Phase 3)
 
 ```go
