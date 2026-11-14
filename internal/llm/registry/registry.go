@@ -73,11 +73,17 @@ func Load(path string) (*Registry, error) {
 	return reg, nil
 }
 
-// Parse unmarshal YAML rồi validate.
+// Parse unmarshal YAML, chuẩn hoá base_url (file có thể bị sửa tay) rồi validate.
 func Parse(data []byte) (*Registry, error) {
 	var reg Registry
 	if err := yaml.Unmarshal(data, &reg); err != nil {
 		return nil, fmt.Errorf("yaml không hợp lệ: %w", err)
+	}
+	for name, p := range reg.Providers {
+		if u, err := NormalizeBaseURL(p.BaseURL); err == nil { // lỗi để Validate báo
+			p.BaseURL = u
+			reg.Providers[name] = p
+		}
 	}
 	if err := reg.Validate(); err != nil {
 		return nil, err

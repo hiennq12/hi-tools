@@ -29,11 +29,10 @@ type HTTPError struct {
 }
 
 func (e *HTTPError) Error() string {
-	status := e.Status
-	if status == "" {
-		status = http.StatusText(e.StatusCode)
+	if e.Status != "" { // resp.Status đã có mã: "401 Unauthorized"
+		return "HTTP " + e.Status
 	}
-	return fmt.Sprintf("HTTP %d %s", e.StatusCode, status)
+	return fmt.Sprintf("HTTP %d %s", e.StatusCode, http.StatusText(e.StatusCode))
 }
 
 // ListModels gọi GET {baseURL}/models với Bearer token và trả danh sách id đã sort.

@@ -16,7 +16,12 @@ import (
 func runLs(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	if _, err := parseArgs(fs, args); err != nil {
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(pos) > 0 {
+		fmt.Fprintf(stderr, "hi-llm ls: tham số thừa %q\n", pos)
 		return 2
 	}
 

@@ -119,3 +119,14 @@ func TestNewClientHasTimeout(t *testing.T) {
 		t.Fatal("client HTTP không có timeout (muốn 15s)")
 	}
 }
+
+func TestHTTPErrorNoDuplicateCode(t *testing.T) {
+	for _, e := range []*provider.HTTPError{
+		{StatusCode: 401, Status: "401 Unauthorized"},
+		{StatusCode: 401},
+	} {
+		if got := e.Error(); got != "HTTP 401 Unauthorized" {
+			t.Fatalf("Error() = %q, muốn \"HTTP 401 Unauthorized\"", got)
+		}
+	}
+}

@@ -356,3 +356,44 @@ func TestAddSubscriptionNameRejected(t *testing.T) {
 		t.Fatalf("add trùng tên subscription exit 0 (stdout=%q)", stdout)
 	}
 }
+
+func TestAddLsRejectExtraArgs(t *testing.T) {
+	e := newCLIEnv(t)
+	for _, args := range [][]string{
+		{"add", "deeprelay", "--name", "p", "--base-url", "https://x.example", "--api-key-env", "X", "--skip-verify"},
+		{"ls", "extra"},
+	} {
+		code, _, stderr := runCLI(t, "", args...)
+		if code != 2 || !strings.Contains(stderr, "thừa") {
+			t.Fatalf("%v: code=%d stderr=%q, muốn exit 2 báo tham số thừa", args, code, stderr)
+		}
+	}
+	if e.exists(e.providersPath()) {
+		t.Fatal("tham số thừa nhưng providers.yaml vẫn được ghi")
+	}
+}
+
+func TestAddEnvUnsetWarnsNoTTY(t *testing.T) {
+	e := newCLIEnv(t)
+	t.Setenv("HI_LLM_TEST_UNSET", "")
+	code, _, stderr := runCLI(t, "", "add", "--name", "p", "--base-url", "https://x.example", "--api-key-env", "HI_LLM_TEST_UNSET")
+	if code != 1 || !strings.Contains(stderr, "cảnh báo") || !strings.Contains(stderr, "chưa đặt") {
+		t.Fatalf("code=%d stderr=%q, muốn exit 1 + cảnh báo biến chưa đặt", code, stderr)
+	}
+	if e.exists(e.providersPath()) {
+		t.Fatal("biến env chưa đặt (không TTY) nhưng providers.yaml vẫn được ghi")
+	}
+}
+
+func TestReadLineDoesNotReadAhead(t *testing.T) {
+	r := strings.NewReader("tên\nsk-key\n")
+	if got, _ := readLine(r); got != "tên" {
+		t.Fatalf("dòng 1 = %q", got)
+	}
+	if r.Len() != len("sk-key\n") {
+		t.Fatalf("readLine đọc lố: còn %d byte, muốn %d", r.Len(), len("sk-key\n"))
+	}
+	if got, _ := readLine(r); got != "sk-key" {
+		t.Fatalf("dòng 2 = %q", got)
+	}
+}

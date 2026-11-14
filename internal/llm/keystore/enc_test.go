@@ -349,3 +349,14 @@ func TestEnvPassword(t *testing.T) {
 		t.Fatalf("password = %q, muốn master-from-env", got)
 	}
 }
+
+func TestEncStoreEmptyPasswordOnCreate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.enc")
+	err := keystore.NewEncStore(path, fixedPassword("")).Set("p", "sk-x")
+	if !errors.Is(err, keystore.ErrEmptyPassword) {
+		t.Fatalf("Set với password rỗng: err = %v, muốn ErrEmptyPassword", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("password rỗng nhưng keys.enc vẫn được ghi")
+	}
+}

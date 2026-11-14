@@ -225,3 +225,13 @@ func TestEnvRegistryPathUsesHome(t *testing.T) {
 		t.Fatalf("stdout sai:\n%s", stdout)
 	}
 }
+
+func TestEnvBadStyleCheckedBeforePassword(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, registryWithDeeprelay)
+	t.Setenv(keystore.EnvMasterPassword, "")
+	code, _, stderr := runCLI(t, "", "env", "deeprelay", "--style", "gemini")
+	if code != 2 || !strings.Contains(stderr, "style") || strings.Contains(stderr, "keys.enc") || strings.Contains(stderr, "password") {
+		t.Fatalf("code=%d stderr=%q, muốn báo style sai trước, không đụng keystore", code, stderr)
+	}
+}

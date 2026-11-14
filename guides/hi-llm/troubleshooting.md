@@ -10,7 +10,8 @@
 | `master password không được rỗng` | tạo `keys.enc` mới với password rỗng | đặt password khác rỗng |
 | `master password nhập lại không khớp` | 2 lần gõ khác nhau khi tạo `keys.enc` | chạy lại `add` |
 | `chưa có keys.enc, chạy hi-llm add` | registry có `enc:<name>` nhưng `keys.enc` đã bị xoá / chưa tạo | `hi-llm add --name <name> ... --force` để lưu lại key |
-| `biến môi trường X chưa đặt` | provider dạng `env:X` mà biến `X` trống trong shell hiện tại | `export X=...` rồi chạy lại |
+| `biến môi trường X chưa đặt` | provider dạng `env:X` mà biến `X` trống trong shell hiện tại (`add` có terminal thì hỏi `Vẫn lưu provider?`) | `export X=...` rồi chạy lại |
+| `tham số thừa [...]` | gõ tên provider không kèm `--name` (`hi-llm add deeprelay`) hoặc `ls` có tham số | `hi-llm add --name deeprelay ...` |
 | `provider "x" đã tồn tại, dùng --force để ghi đè` | trùng tên khi không có terminal | thêm `--force` |
 | `tên "X" không hợp lệ (chỉ [a-z0-9._-], ...)` | tên có chữ hoa, `/`, dấu cách... | dùng chữ thường, số, `.` `_` `-` |
 | `base_url "..." phải dùng http hoặc https` | URL sai scheme / thiếu host | sửa URL |
@@ -39,8 +40,3 @@
 - Chỉ provider OpenAI-compatible (`GET /models` trả `{"data":[{"id":...}]}`).
 - Mỗi lệnh cần key `enc:` đều hỏi master password (chưa cache trong phiên) — dùng `HI_LLM_MASTER_PASSWORD` nếu gọi nhiều lần.
 - Chưa có: `ping`, `use` (fzf), `defaults`, `sync` sang opencode/commandcode, `role` cho my-flow, backend `plain:`/`keychain:`.
-- Đã biết, chưa sửa (ghi trong todos của repo):
-  - sửa tay `base_url` có `/` cuối (vd `.../v1/`) → `models` gọi sai đường dẫn; dùng `add --force` thay vì sửa tay.
-  - lỗi HTTP in lặp mã (`HTTP 401 401 Unauthorized`).
-  - `add`/`ls` lờ đi tham số thừa (vd `hi-llm add deeprelay` quên `--name` → wizard hỏi tên như bình thường).
-  - `env <p> --style sai` hỏi password trước rồi mới báo style sai.

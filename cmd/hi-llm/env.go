@@ -24,6 +24,10 @@ func runEnv(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	name := pos[0]
+	if _, err := envLines(*style, "", ""); err != nil { // báo style sai trước khi hỏi password
+		fmt.Fprintf(stderr, "hi-llm env: %v\n", err)
+		return 2
+	}
 
 	home, err := registry.HomeDir()
 	if err != nil {

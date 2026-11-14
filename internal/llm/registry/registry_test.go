@@ -322,3 +322,19 @@ func TestHomeDirAndPath(t *testing.T) {
 		t.Fatalf("Path = %q, muốn %q", p, filepath.Join(home, "providers.yaml"))
 	}
 }
+
+func TestParseNormalizesHandEditedBaseURL(t *testing.T) {
+	reg, err := registry.Parse([]byte(`providers:
+  a: {kind: openai, base_url: "https://a.example/v1/", api_key: "env:A"}
+  b: {kind: openai, base_url: "https://b.example", api_key: "env:B"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reg.Providers["a"].BaseURL; got != "https://a.example/v1" {
+		t.Fatalf("a.base_url = %q, muốn bỏ / cuối", got)
+	}
+	if got := reg.Providers["b"].BaseURL; got != "https://b.example/v1" {
+		t.Fatalf("b.base_url = %q, muốn nối /v1", got)
+	}
+}

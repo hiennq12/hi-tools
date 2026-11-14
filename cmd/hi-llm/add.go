@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -35,7 +34,12 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.BoolVar(&force, "force", false, "ghi đè provider đã có")
 	fs.BoolVar(&skipVerify, "skip-verify", false, "bỏ qua bước gọi thử /models")
 
-	if _, err := parseArgs(fs, args); err != nil {
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(pos) > 0 {
+		fmt.Fprintf(stderr, "hi-llm add: tham số thừa %q (tên provider dùng --name)\n", pos)
 		return 2
 	}
 	if apiKeyStdin && apiKeyEnv != "" {
@@ -44,7 +48,7 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	tty := hix.IsTTY(stdin)
-	in := bufio.NewReader(stdin)
+	in := stdin // đọc không đệm, dùng chung fd với hix.ReadPassword
 
 	if name == "" {
 		if !tty {
@@ -125,8 +129,8 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	)
 	switch {
 	case apiKeyStdin:
-		line, err := in.ReadString('\n')
-		if err != nil && err != io.EOF {
+		line, err := readLine(in)
+		if err != nil {
 			fmt.Fprintf(stderr, "hi-llm add: đọc api key từ stdin: %v\n", err)
 			return 1
 		}
@@ -175,16 +179,17 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	if !skipVerify {
-		keyForVerify := secret
+		key, verr := secret, error(nil)
 		if strings.HasPrefix(pointer, "env:") {
-			keyForVerify, err = (keystore.EnvStore{}).Get(strings.TrimPrefix(pointer, "env:"))
-			if err != nil {
-				fmt.Fprintf(stderr, "hi-llm add: %v\n", err)
-				return 1
+			key, verr = (keystore.EnvStore{}).Get(strings.TrimPrefix(pointer, "env:"))
+		}
+		if verr == nil {
+			if _, err := provider.NewClient().ListModels(context.Background(), baseURL, key); err != nil {
+				verr = fmt.Errorf("xác minh %s/models thất bại: %w", baseURL, err)
 			}
 		}
-		if _, err := provider.NewClient().ListModels(context.Background(), baseURL, keyForVerify); err != nil {
-			fmt.Fprintf(stderr, "cảnh báo: xác minh %s/models thất bại: %v\n", baseURL, err)
+		if verr != nil {
+			fmt.Fprintf(stderr, "cảnh báo: %v\n", verr)
 			if !tty {
 				return 1
 			}
