@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hi-tools/internal/llm/keystore"
+	"hi-tools/internal/llm/provider"
 )
 
 func newTestEncStore(t *testing.T) *keystore.EncStore {
@@ -267,11 +268,142 @@ func TestLsHeader(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d (stderr=%q)", code, stderr)
 	}
-	for _, col := range []string{"NAME", "KIND", "BASE_URL", "KEY", "MODELS"} {
+	for _, col := range []string{"NAME", "KIND", "BASE_URL", "KEY", "MODELS", "PING"} {
 		if !strings.Contains(stdout, col) {
 			t.Fatalf("bảng thiếu cột %s:\n%s", col, stdout)
 		}
 	}
+}
+
+func TestPingStatus(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name string
+		r    provider.PingResult
+		ok   bool
+		want []string
+	}{
+		{
+			name: "ok 320ms 5 phút",
+			r:    provider.PingResult{At: now.Add(-5 * time.Minute), OK: true, LatencyMS: 320},
+			ok:   true,
+			want: []string{"✅", "320ms", "5m"},
+		},
+		{
+			name: "lỗi auth 2 giờ",
+			r:    provider.PingResult{At: now.Add(-2 * time.Hour), OK: false, Kind: "auth"},
+			ok:   true,
+			want: []string{"❌", "auth", "2h"},
+		},
+		{
+			name: "chưa ping",
+			r:    provider.PingResult{},
+			ok:   false,
+			want: []string{"-"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pingStatus(tc.r, tc.ok, now)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("pingStatus = %q, muốn chứa %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLsPingColumnFromPingFile(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, `providers:
+  deeprelay:
+    kind: openai
+    base_url: https://api.deeprelay.example/v1
+    api_key: env:DEEPRELAY_KEY
+  opencode-go:
+    kind: openai
+    base_url: https://opencode.example/v1
+    api_key: env:OPENCODE_KEY
+`)
+	t.Setenv("DEEPRELAY_KEY", "sk-d")
+	t.Setenv("OPENCODE_KEY", "sk-o")
+
+	if err := provider.SavePings(e.cacheDir, map[string]provider.PingResult{
+		"deeprelay":   {At: time.Now().Add(-5 * time.Minute), OK: true, LatencyMS: 320},
+		"opencode-go": {At: time.Now().Add(-2 * time.Hour), OK: false, Kind: "auth", Error: "HTTP 401 Unauthorized"},
+	}); err != nil {
+		t.Fatalf("SavePings: %v", err)
+	}
+
+	code, stdout, stderr := runCLI(t, "", "ls")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr=%q)", code, stderr)
+	}
+
+	var deeprelay, opencode string
+	for _, line := range strings.Split(stdout, "\n") {
+		switch {
+		case strings.HasPrefix(line, "deeprelay"):
+			deeprelay = line
+		case strings.HasPrefix(line, "opencode-go"):
+			opencode = line
+		}
+	}
+	if !strings.Contains(deeprelay, "✅") || !strings.Contains(deeprelay, "320ms") || !strings.Contains(deeprelay, "5m") {
+		t.Fatalf("dòng deeprelay = %q, muốn ✅ 320ms (5m)", deeprelay)
+	}
+	if !strings.Contains(opencode, "❌") || !strings.Contains(opencode, "auth") || !strings.Contains(opencode, "2h") {
+		t.Fatalf("dòng opencode-go = %q, muốn ❌ auth (2h)", opencode)
+	}
+}
+
+func TestLsPingColumnMissingFileIsDash(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, registryWithDeeprelay)
+
+	code, stdout, stderr := runCLI(t, "", "ls")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr=%q)", code, stderr)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if !strings.HasPrefix(line, "deeprelay") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[len(fields)-1] != "-" {
+			t.Fatalf("dòng deeprelay chưa ping phải kết thúc bằng -: %q", line)
+		}
+		return
+	}
+	t.Fatalf("không thấy dòng deeprelay trong output:\n%s", stdout)
+}
+
+func TestLsPingColumnSubscriptionDash(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, registryWithDeeprelay)
+
+	if err := provider.SavePings(e.cacheDir, map[string]provider.PingResult{
+		"deeprelay": {At: time.Now(), OK: true, LatencyMS: 10},
+	}); err != nil {
+		t.Fatalf("SavePings: %v", err)
+	}
+
+	code, stdout, stderr := runCLI(t, "", "ls")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr=%q)", code, stderr)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if !strings.HasPrefix(line, "claude") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[len(fields)-1] != "-" {
+			t.Fatalf("subscription phải có PING -: %q", line)
+		}
+		return
+	}
+	t.Fatalf("không thấy dòng claude trong output:\n%s", stdout)
 }
 
 func TestLsEmptyRegistry(t *testing.T) {

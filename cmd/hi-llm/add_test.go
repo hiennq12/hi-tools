@@ -385,6 +385,81 @@ func TestAddEnvUnsetWarnsNoTTY(t *testing.T) {
 	}
 }
 
+func TestAddForceKeepsHeaders(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, `providers:
+  opencode-go:
+    kind: openai
+    base_url: https://old.example/v1
+    api_key: enc:opencode-go
+    headers:
+      x-opencode-session: 3f2c-uuid
+subscriptions:
+  claude:
+    harness: claude
+`)
+
+	code, stdout, stderr := runCLI(t, "",
+		"add", "--name", "opencode-go", "--base-url", "https://new.example/v1",
+		"--api-key-env", "NEW_KEY", "--force", "--skip-verify",
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, muốn 0 (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+
+	reg, err := registry.Load(e.providersPath())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := reg.Providers["opencode-go"]
+	if p.BaseURL != "https://new.example/v1" || p.APIKey != "env:NEW_KEY" {
+		t.Fatalf("provider không được ghi đè: %+v", p)
+	}
+	if got := p.Headers["x-opencode-session"]; got != "3f2c-uuid" {
+		t.Fatalf("--force làm mất headers cũ: %+v", p.Headers)
+	}
+}
+
+func TestAddForceVerifyUsesKeptHeaders(t *testing.T) {
+	e := newCLIEnv(t)
+
+	var gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("x-opencode-session")
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+	}))
+	defer srv.Close()
+
+	e.writeRegistry(t, `providers:
+  opencode-go:
+    kind: openai
+    base_url: `+srv.URL+`/v1
+    api_key: enc:opencode-go
+    headers:
+      x-opencode-session: 3f2c-uuid
+`)
+	t.Setenv("NEW_KEY", "sk-new")
+
+	code, stdout, stderr := runCLI(t, "",
+		"add", "--name", "opencode-go", "--base-url", srv.URL+"/v1",
+		"--api-key-env", "NEW_KEY", "--force",
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, muốn 0 (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if gotHeader != "3f2c-uuid" {
+		t.Fatalf("verify không gửi header cũ của provider: nhận %q", gotHeader)
+	}
+
+	reg, err := registry.Load(e.providersPath())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := reg.Providers["opencode-go"].Headers["x-opencode-session"]; got != "3f2c-uuid" {
+		t.Fatalf("headers không được giữ sau verify: %+v", reg.Providers["opencode-go"].Headers)
+	}
+}
+
 func TestReadLineDoesNotReadAhead(t *testing.T) {
 	r := strings.NewReader("tên\nsk-key\n")
 	if got, _ := readLine(r); got != "tên" {

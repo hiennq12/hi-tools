@@ -360,3 +360,72 @@ func TestEncStoreEmptyPasswordOnCreate(t *testing.T) {
 		t.Fatal("password rỗng nhưng keys.enc vẫn được ghi")
 	}
 }
+
+func TestOncePasswordCallsOriginalOnceOnSuccess(t *testing.T) {
+	calls := 0
+	fn := keystore.OncePassword(func(bool) (string, error) {
+		calls++
+		return "master", nil
+	})
+
+	for i := 0; i < 3; i++ {
+		got, err := fn(false)
+		if err != nil {
+			t.Fatalf("lần %d: %v", i, err)
+		}
+		if got != "master" {
+			t.Fatalf("lần %d = %q, muốn master", i, got)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("hàm gốc được gọi %d lần, muốn đúng 1", calls)
+	}
+}
+
+func TestOncePasswordDoesNotRememberError(t *testing.T) {
+	calls := 0
+	fn := keystore.OncePassword(func(bool) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("lỗi tạm thời")
+		}
+		return "recovered", nil
+	})
+
+	if _, err := fn(false); err == nil {
+		t.Fatal("lần đầu lỗi nhưng OncePassword trả nil")
+	}
+	got, err := fn(false)
+	if err != nil {
+		t.Fatalf("lần hai (sau lỗi) lỗi: %v", err)
+	}
+	if got != "recovered" {
+		t.Fatalf("lần hai = %q, muốn recovered", got)
+	}
+	if calls != 2 {
+		t.Fatalf("hàm gốc được gọi %d lần, muốn 2 (không nhớ lỗi)", calls)
+	}
+}
+
+func TestOncePasswordKeepsFirstValue(t *testing.T) {
+	calls := 0
+	fn := keystore.OncePassword(func(bool) (string, error) {
+		calls++
+		return "first", nil
+	})
+
+	first, err := fn(false)
+	if err != nil {
+		t.Fatalf("lần 1: %v", err)
+	}
+	second, err := fn(true)
+	if err != nil {
+		t.Fatalf("lần 2: %v", err)
+	}
+	if first != "first" || second != "first" {
+		t.Fatalf("giá trị = %q/%q, muốn cả hai là first", first, second)
+	}
+	if calls != 1 {
+		t.Fatalf("hàm gốc được gọi %d lần, muốn 1 dù confirm khác", calls)
+	}
+}

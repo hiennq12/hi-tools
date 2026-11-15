@@ -323,6 +323,156 @@ func TestHomeDirAndPath(t *testing.T) {
 	}
 }
 
+func TestParseHeadersAndHarnesses(t *testing.T) {
+	reg, err := registry.Parse([]byte(`providers:
+  opencode-go:
+    kind: openai
+    base_url: https://opencode.ai/zen/go/v1
+    api_key: enc:opencode-go
+    headers:
+      x-opencode-session: 3f2c-uuid
+    harnesses: [opencode, commandcode]
+subscriptions:
+  agy:
+    harness: agy
+    models: [gemini-3.8-flash-high, gemini-3.8-flash-medium]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p := reg.Providers["opencode-go"]
+	if got := p.Headers["x-opencode-session"]; got != "3f2c-uuid" {
+		t.Fatalf("headers[x-opencode-session] = %q, muốn 3f2c-uuid", got)
+	}
+	if len(p.Harnesses) != 2 || p.Harnesses[0] != "opencode" || p.Harnesses[1] != "commandcode" {
+		t.Fatalf("harnesses = %v, muốn [opencode commandcode]", p.Harnesses)
+	}
+	sub := reg.Subscriptions["agy"]
+	if len(sub.Models) != 2 || sub.Models[0] != "gemini-3.8-flash-high" {
+		t.Fatalf("subscription models = %v, muốn 2 model", sub.Models)
+	}
+}
+
+func TestSaveRoundTripHeadersAndHarnesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "providers.yaml")
+	reg := &registry.Registry{
+		Providers: map[string]registry.Provider{
+			"p": {
+				Kind:      "openai",
+				BaseURL:   "https://p.example/v1",
+				APIKey:    "enc:p",
+				Headers:   map[string]string{"x-session": "abc"},
+				Harnesses: []string{"opencode"},
+			},
+		},
+		Subscriptions: map[string]registry.Subscription{
+			"agy": {Harness: "agy", Models: []string{"m1"}},
+		},
+	}
+	if err := reg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := registry.Load(path)
+	if err != nil {
+		t.Fatalf("Load sau Save: %v", err)
+	}
+	if got := loaded.Providers["p"].Headers["x-session"]; got != "abc" {
+		t.Fatalf("round-trip mất headers: %+v", loaded.Providers["p"])
+	}
+	if got := loaded.Providers["p"].Harnesses; len(got) != 1 || got[0] != "opencode" {
+		t.Fatalf("round-trip mất harnesses: %v", got)
+	}
+	if got := loaded.Subscriptions["agy"].Models; len(got) != 1 || got[0] != "m1" {
+		t.Fatalf("round-trip mất subscription models: %v", got)
+	}
+}
+
+func TestHarnessListDefaultIsOpencode(t *testing.T) {
+	got := registry.Provider{}.HarnessList()
+	if len(got) != 1 || got[0] != "opencode" {
+		t.Fatalf("HarnessList() rỗng = %v, muốn [opencode]", got)
+	}
+
+	got = registry.Provider{Harnesses: []string{"opencode", "commandcode"}}.HarnessList()
+	if len(got) != 2 || got[0] != "opencode" || got[1] != "commandcode" {
+		t.Fatalf("HarnessList() = %v, muốn [opencode commandcode]", got)
+	}
+}
+
+func TestValidateRejectsBadHeaders(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"authorization thường", map[string]string{"authorization": "Bearer x"}},
+		{"authorization hoa", map[string]string{"AUTHORIZATION": "Bearer x"}},
+		{"authorization hỗn hợp", map[string]string{"aUtHoRiZaTiOn": "Bearer x"}},
+		{"tên rỗng", map[string]string{"": "v"}},
+		{"có khoảng trắng", map[string]string{"x bad": "v"}},
+		{"có dấu hai chấm", map[string]string{"x:bad": "v"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := &registry.Registry{Providers: map[string]registry.Provider{
+				"p": {Kind: "openai", BaseURL: "https://p.example/v1", APIKey: "env:P_KEY", Headers: tc.headers},
+			}}
+			err := reg.Validate()
+			if err == nil {
+				t.Fatalf("Validate chấp nhận headers %v", tc.headers)
+			}
+			if !strings.Contains(err.Error(), "header") {
+				t.Fatalf("lỗi %q không nêu header", err)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsCustomHeaders(t *testing.T) {
+	reg := &registry.Registry{Providers: map[string]registry.Provider{
+		"p": {
+			Kind:    "openai",
+			BaseURL: "https://p.example/v1",
+			APIKey:  "env:P_KEY",
+			Headers: map[string]string{"x-opencode-session": "uuid", "X-Extra": "v"},
+		},
+	}}
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("Validate từ chối header hợp lệ: %v", err)
+	}
+}
+
+func TestValidateRejectsBadHarnessName(t *testing.T) {
+	cases := [][]string{
+		{"Bad"},
+		{"a b"},
+		{"a:b"},
+		{""},
+	}
+	for _, harnesses := range cases {
+		reg := &registry.Registry{Providers: map[string]registry.Provider{
+			"p": {Kind: "openai", BaseURL: "https://p.example/v1", APIKey: "env:P_KEY", Harnesses: harnesses},
+		}}
+		if err := reg.Validate(); err == nil {
+			t.Fatalf("Validate chấp nhận harnesses %v", harnesses)
+		}
+	}
+}
+
+func TestValidateAcceptsValidHarnesses(t *testing.T) {
+	reg := &registry.Registry{Providers: map[string]registry.Provider{
+		"p": {
+			Kind:      "openai",
+			BaseURL:   "https://p.example/v1",
+			APIKey:    "env:P_KEY",
+			Harnesses: []string{"opencode", "commandcode"},
+		},
+	}}
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("Validate từ chối harnesses hợp lệ: %v", err)
+	}
+}
+
 func TestParseNormalizesHandEditedBaseURL(t *testing.T) {
 	reg, err := registry.Parse([]byte(`providers:
   a: {kind: openai, base_url: "https://a.example/v1/", api_key: "env:A"}
