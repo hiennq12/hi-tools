@@ -99,7 +99,10 @@ func runModels(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	resolver := keystore.Resolver{Enc: keystore.NewEncStore(keystore.KeysPath(home), keystore.PromptPassword(stdin, stderr))}
 	keyFn := func() (string, error) { return resolver.Resolve(p.APIKey) }
 
-	models, err := provider.NewClient().CachedModels(context.Background(), cacheDir, name, p.BaseURL, keyFn, ttlDur, refresh)
+	client := provider.NewClient()
+	client.Headers = p.Headers
+
+	models, err := client.CachedModels(context.Background(), cacheDir, name, p.BaseURL, keyFn, ttlDur, refresh)
 	if err != nil {
 		fmt.Fprintf(stderr, "hi-llm models: %v\n", err)
 		return 1

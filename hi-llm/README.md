@@ -31,22 +31,24 @@ providers:
     kind: openai
     base_url: https://.../v1
     api_key: enc:deeprelay        # con trỏ tới keystore
+    harnesses: [opencode, commandcode]  # harness nào đã khai provider này (mặc định [opencode])
   opencode-go:
     kind: openai
     base_url: https://.../v1
     api_key: env:OPENCODE_API_KEY # hoặc env var có sẵn
+    headers:                      # header riêng, gửi kèm mọi request (sửa tay)
+      x-opencode-session: 3f2c...-uuid
 subscriptions:
-  claude: { harness: claude }
-  agy:    { harness: agy }
-defaults:
-  chat: opencode-go/qwen3.8-max
-  review: claude/claude-opus-5-5
+  claude: { harness: claude, models: [claude-opus-5-5, claude-sonnet-5-5] }
+  agy:    { harness: agy, models: [gemini-3.8-flash-high] }
 ```
+
+`headers` không được chứa `Authorization` (key luôn đi qua `api_key`) và tên header không có khoảng trắng/`:`.
 
 ## Lưu API key — backend `enc` (mặc định)
 
 - File `~/.config/hi-llm/keys.enc`: AES-GCM, khoá dẫn xuất từ **master password** bằng argon2id — thuần Go, không cgo, chạy được cả macOS lẫn Ubuntu/VPS.
-- Master password hỏi qua terminal (ẩn ký tự, `golang.org/x/term`) hoặc lấy từ env `HI_LLM_MASTER_PASSWORD`; cache trong session để không hỏi lại mỗi lệnh (phase sau).
+- Master password hỏi qua terminal (ẩn ký tự, `golang.org/x/term`) hoặc lấy từ env `HI_LLM_MASTER_PASSWORD`; mỗi lần chạy chỉ hỏi một lần dù nhiều provider `enc:` (không cache giữa các lệnh).
 - Sai password → giải mã fail → báo lỗi rõ, không ghi đè.
 - `providers.yaml` chỉ chứa *con trỏ*, copy cả thư mục config sang máy khác là dùng được.
 
@@ -67,10 +69,9 @@ Các backend phụ (hỗ trợ, không mặc định):
 | 1 | `hi-llm ls` | bảng tổng quan: provider, loại, số model (cache), key hợp lệ?, ping lần cuối |
 | 1 | `hi-llm models [provider]` | gọi `{base_url}/models`, cache TTL, in bảng hoặc mở fzf |
 | 1 | `hi-llm env <provider>` | in `export ...` (OPENAI_API_KEY/BASE_URL hoặc ANTHROPIC_*) → `eval "$(hi-llm env deeprelay)"` |
-| 2 | `hi-llm ping [provider\|all]` | health check mỗi provider (request tí hon), ✅/❌ + độ trễ + lỗi quota/auth |
-| 2 | `hi-llm use` | fzf 2 bước: chọn provider → chọn model → ghi vào nơi tiêu thụ được chọn |
+| 2 | `hi-llm ping [provider...] [--chat MODEL]` | health check provider (song song), ✅/❌ + độ trễ + lỗi auth/quota; lưu `_ping.json` cho `ls` |
+| 2 | `hi-llm role [role [value]] [--force]` | fzf (hoặc đặt trực tiếp) model cho từng role trong my-flow `roles.conf` |
 | 3 | `hi-llm sync [harness]` | sinh config harness từ registry (không tham số = tất cả) |
-| 3 | `hi-llm role <role> [provider/model]` | cập nhật dòng role trong my-flow `roles.conf` |
 
 ## Usage Phase 1
 
@@ -84,10 +85,16 @@ hi-llm add --name opencode-go --base-url https://relay.example/v1 \
 hi-llm add --name deeprelay --base-url https://relay.example/v1 \
   --api-key-stdin --force --skip-verify        # ghi đè, không gọi thử /models
 
-HI_LLM_MASTER_PASSWORD=... hi-llm ls           # bảng NAME/KIND/BASE_URL/KEY/MODELS
+HI_LLM_MASTER_PASSWORD=... hi-llm ls           # bảng NAME/KIND/BASE_URL/KEY/MODELS/PING
 hi-llm models                                  # gộp model của mọi provider từ cache
 hi-llm models deeprelay --refresh              # gọi lại GET {base_url}/models
 hi-llm models deeprelay --ttl 10m --json       # đổi TTL cache, in JSON
+
+hi-llm ping                                    # ping mọi provider, ghi _ping.json
+hi-llm ping opencode-go --chat deepseek-v4.1-flash  # thử cả /chat/completions
+hi-llm role                                    # bảng ROLE | VALUE hiện tại
+hi-llm role implement                          # fzf chọn model cho role
+hi-llm role implement opencode:deeprelay/m1    # đặt trực tiếp, không cần TTY
 
 eval "$(hi-llm env deeprelay)"                   # OPENAI_API_KEY / OPENAI_BASE_URL
 eval "$(hi-llm env deeprelay --style anthropic)" # ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL
@@ -99,6 +106,10 @@ eval "$(hi-llm env deeprelay --style anthropic)" # ANTHROPIC_AUTH_TOKEN / ANTHRO
   con trỏ `env:VAR`, không tạo `keys.enc`.
 - `ls` không bao giờ hỏi master password: có `HI_LLM_MASTER_PASSWORD` thì hiện `enc ✅`/`enc ❌`,
   không có thì `enc 🔒`.
+- `ping` cần key thật: provider `env:` thiếu biến hoặc `enc:` không mở được → ❌ `key` (không gửi request).
+  Không có TTY để hỏi password thì các provider `enc:` báo ❌, provider khác vẫn ping bình thường.
+- `role` đọc/ghi `roles.conf` của my-flow (`HI_LLM_ROLES` nếu đặt, không thì cạnh binary `flow`).
+  Danh sách chọn lấy từ cache model của provider (theo `harnesses`) + `models` khai cho subscription.
 
 ## Harness adapter (Phase 3)
 
@@ -113,7 +124,7 @@ type Harness interface {
 - `harness_opencode.go` → ghi `~/.config/opencode/opencode.json`
 - `harness_commandcode.go` → config commandcode
 - Thêm harness mới = viết 1 file adapter; registry/các lệnh khác không đổi.
-- Subscription CLI không cần sync — chỉ được liệt kê trong `use`/`role`.
+- Subscription CLI không cần sync — chỉ được liệt kê trong `role`.
 
 ## Kịch bản dùng hàng ngày
 
@@ -150,9 +161,9 @@ hi-tools/
 
 | Phase | Nội dung |
 |---|---|
-| 1 | Registry + keystore `enc` + `add`/`ls`/`models`/`env` ← đang làm |
-| 2 | `ping` + cache + `use` (fzf) |
-| 3 | Harness adapter: `sync opencode`, `sync commandcode`, `role` cho my-flow |
+| 1 | Registry + keystore `enc` + `add`/`ls`/`models`/`env` ✅ |
+| 2 | `ping` + header riêng của provider + `role` cho my-flow ✅ (không làm `use`, `defaults`) |
+| 3 | Harness adapter: `sync opencode`, `sync commandcode` |
 | 4 | (tuỳ hứng) health check định kỳ, cảnh báo quota |
 
 Phạm vi relay hiện tại: chỉ OpenAI-compatible `/v1/models`; format khác tính sau.

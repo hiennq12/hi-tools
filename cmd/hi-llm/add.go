@@ -105,7 +105,8 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "hi-llm add: tên %q đã là subscription, không thể thêm provider\n", name)
 		return 2
 	}
-	if _, exists := reg.Providers[name]; exists {
+	old, existed := reg.Providers[name]
+	if existed {
 		if !force {
 			if !tty {
 				fmt.Fprintf(stderr, "hi-llm add: provider %q đã tồn tại, dùng --force để ghi đè\n", name)
@@ -178,13 +179,20 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
+	var keptHeaders map[string]string
+	if existed {
+		keptHeaders = old.Headers
+	}
+
 	if !skipVerify {
 		key, verr := secret, error(nil)
 		if strings.HasPrefix(pointer, "env:") {
 			key, verr = (keystore.EnvStore{}).Get(strings.TrimPrefix(pointer, "env:"))
 		}
 		if verr == nil {
-			if _, err := provider.NewClient().ListModels(context.Background(), baseURL, key); err != nil {
+			client := provider.NewClient()
+			client.Headers = keptHeaders
+			if _, err := client.ListModels(context.Background(), baseURL, key); err != nil {
 				verr = fmt.Errorf("xác minh %s/models thất bại: %w", baseURL, err)
 			}
 		}
@@ -215,7 +223,7 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if reg.Providers == nil {
 		reg.Providers = map[string]registry.Provider{}
 	}
-	reg.Providers[name] = registry.Provider{Kind: kind, BaseURL: baseURL, APIKey: pointer}
+	reg.Providers[name] = registry.Provider{Kind: kind, BaseURL: baseURL, APIKey: pointer, Headers: keptHeaders}
 	if err := reg.Validate(); err != nil {
 		fmt.Fprintf(stderr, "hi-llm add: %v\n", err)
 		return 1

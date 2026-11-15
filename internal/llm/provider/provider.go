@@ -2,11 +2,15 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -14,7 +18,8 @@ import (
 
 // Client là HTTP client gọi provider.
 type Client struct {
-	HTTP *http.Client
+	HTTP    *http.Client
+	Headers map[string]string
 }
 
 // NewClient tạo client với timeout 15s.
@@ -45,6 +50,7 @@ func (c *Client) ListModels(ctx context.Context, baseURL, apiKey string) ([]stri
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	c.setHeaders(req)
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, err
@@ -62,6 +68,80 @@ func (c *Client) httpClient() *http.Client {
 		return &http.Client{Timeout: 15 * time.Second}
 	}
 	return c.HTTP
+}
+
+// setHeaders gửi kèm các header riêng của provider (sau Authorization để không ghi đè key).
+func (c *Client) setHeaders(req *http.Request) {
+	if c == nil {
+		return
+	}
+	for k, v := range c.Headers {
+		req.Header.Set(k, v)
+	}
+}
+
+// Chat gọi POST {baseURL}/chat/completions để kiểm model còn dùng được.
+// Không đọc nội dung: model reasoning có thể trả content null.
+func (c *Client) Chat(ctx context.Context, baseURL, apiKey, model string) error {
+	payload, err := json.Marshal(map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": "ping"},
+		},
+		"max_tokens": 16,
+	})
+	if err != nil {
+		return err
+	}
+	url := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	c.setHeaders(req)
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return &HTTPError{StatusCode: resp.StatusCode, Status: resp.Status}
+	}
+	return nil
+}
+
+// Classify xếp lỗi thành auth/quota/http/net/response (key do lệnh ping tự gán).
+func Classify(err error) string {
+	if err == nil {
+		return ""
+	}
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "auth"
+		case http.StatusPaymentRequired, http.StatusTooManyRequests:
+			return "quota"
+		default:
+			return "http"
+		}
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return "net"
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return "net"
+	}
+	return "response"
 }
 
 // ParseModels đọc response chuẩn OpenAI {"data":[{"id":...}]} và sort id.

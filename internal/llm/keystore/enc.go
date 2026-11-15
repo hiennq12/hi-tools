@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/crypto/argon2"
 
@@ -231,6 +232,29 @@ func (s *EncStore) Set(name, secret string) error {
 		return err
 	}
 	return hix.WriteFileAtomic(s.Path, out, 0o600)
+}
+
+// OncePassword bọc pw để chỉ gọi hàm gốc một lần khi thành công và trả lại
+// giá trị đó cho các lần sau. Lỗi thì không nhớ. An toàn khi gọi từ nhiều goroutine.
+func OncePassword(pw PasswordFunc) PasswordFunc {
+	var (
+		mu   sync.Mutex
+		done bool
+		val  string
+	)
+	return func(confirm bool) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return val, nil
+		}
+		v, err := pw(confirm)
+		if err != nil {
+			return "", err
+		}
+		val, done = v, true
+		return v, nil
+	}
 }
 
 // EnvPassword trả PasswordFunc chỉ đọc env HI_LLM_MASTER_PASSWORD.

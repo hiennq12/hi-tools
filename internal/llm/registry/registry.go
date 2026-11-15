@@ -24,14 +24,25 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // Provider là một API relay OpenAI-compatible.
 type Provider struct {
-	Kind    string `yaml:"kind"`
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key"`
+	Kind      string            `yaml:"kind"`
+	BaseURL   string            `yaml:"base_url"`
+	APIKey    string            `yaml:"api_key"`
+	Headers   map[string]string `yaml:"headers,omitempty"`
+	Harnesses []string          `yaml:"harnesses,omitempty"`
+}
+
+// HarnessList trả danh sách harness dùng provider này; rỗng → [opencode].
+func (p Provider) HarnessList() []string {
+	if len(p.Harnesses) == 0 {
+		return []string{"opencode"}
+	}
+	return append([]string(nil), p.Harnesses...)
 }
 
 // Subscription là một CLI đã login sẵn (claude, agy...).
 type Subscription struct {
-	Harness string `yaml:"harness"`
+	Harness string   `yaml:"harness"`
+	Models  []string `yaml:"models,omitempty"`
 }
 
 // Registry là nội dung providers.yaml.
@@ -91,7 +102,7 @@ func Parse(data []byte) (*Registry, error) {
 	return &reg, nil
 }
 
-// Validate kiểm tra tên, kind, con trỏ api_key và trùng tên giữa hai map.
+// Validate kiểm tra tên, kind, con trỏ api_key, headers/harnesses và trùng tên giữa hai map.
 func (r *Registry) Validate() error {
 	for name, p := range r.Providers {
 		if err := ValidName(name); err != nil {
@@ -105,6 +116,16 @@ func (r *Registry) Validate() error {
 		}
 		if err := ValidPointer(p.APIKey); err != nil {
 			return fmt.Errorf("provider %q: %w", name, err)
+		}
+		for h := range p.Headers {
+			if err := validHeader(h); err != nil {
+				return fmt.Errorf("provider %q: header %q không hợp lệ", name, h)
+			}
+		}
+		for _, h := range p.Harnesses {
+			if err := ValidName(h); err != nil {
+				return fmt.Errorf("provider %q: harness %q không hợp lệ", name, h)
+			}
 		}
 	}
 	for name := range r.Subscriptions {
@@ -144,6 +165,20 @@ func ValidPointer(p string) error {
 	_ = kind
 	if ref == "" {
 		return fmt.Errorf("con trỏ api_key %q rỗng sau tiền tố", p)
+	}
+	return nil
+}
+
+// validHeader kiểm tra tên header tự khai: không rỗng, không khoảng trắng/":", không phải Authorization.
+func validHeader(name string) error {
+	if name == "" {
+		return errors.New("rỗng")
+	}
+	if strings.ContainsAny(name, " \t\r\n:") {
+		return errors.New("chứa khoảng trắng hoặc dấu hai chấm")
+	}
+	if strings.EqualFold(name, "Authorization") {
+		return errors.New("không được ghi đè Authorization")
 	}
 	return nil
 }

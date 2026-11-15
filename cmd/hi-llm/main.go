@@ -29,6 +29,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runModels(args[1:], stdin, stdout, stderr)
 	case "env":
 		return runEnv(args[1:], stdin, stdout, stderr)
+	case "ping":
+		return runPing(args[1:], stdin, stdout, stderr)
+	case "role":
+		return runRole(args[1:], stdin, stdout, stderr)
 	case "-h", "--help", "help":
 		printUsage(stdout)
 		return 0
@@ -48,6 +52,8 @@ Usage:
   hi-llm ls
   hi-llm models [provider] [--refresh] [--ttl DURATION] [--json]
   hi-llm env <provider> [--style openai|anthropic]
+  hi-llm ping [provider...] [--chat MODEL]
+  hi-llm role [role [value] [--force]]
 `)
 }
 

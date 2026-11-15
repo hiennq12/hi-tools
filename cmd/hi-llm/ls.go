@@ -53,11 +53,12 @@ func runLs(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		enc = keystore.NewEncStore(keystore.KeysPath(home), keystore.EnvPassword())
 	}
 
-	tbl := hix.NewTable("NAME", "KIND", "BASE_URL", "KEY", "MODELS")
+	tbl := hix.NewTable("NAME", "KIND", "BASE_URL", "KEY", "MODELS", "PING")
 	now := time.Now()
+	pings := provider.LoadPings(cacheDir)
 	for _, name := range reg.Names() {
 		if sub, ok := reg.Subscriptions[name]; ok {
-			tbl.Add(name, "sub", sub.Harness, "-", "-")
+			tbl.Add(name, "sub", sub.Harness, "-", "-", "-")
 			continue
 		}
 		p := reg.Providers[name]
@@ -65,7 +66,8 @@ func runLs(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if c, err := provider.LoadCache(cacheDir, name); err == nil {
 			models = fmt.Sprintf("%d (%s)", len(c.Models), formatAge(now.Sub(c.FetchedAt)))
 		}
-		tbl.Add(name, p.Kind, p.BaseURL, keyStatus(p.APIKey, enc), models)
+		ping, pinged := pings[name]
+		tbl.Add(name, p.Kind, p.BaseURL, keyStatus(p.APIKey, enc), models, pingStatus(ping, pinged, now))
 	}
 
 	if err := tbl.Render(stdout); err != nil {
@@ -100,6 +102,18 @@ func keyStatus(pointer string, enc keystore.KeyStore) string {
 	default:
 		return pointer + " ❌"
 	}
+}
+
+// pingStatus mô tả kết quả ping gần nhất: ✅ 320ms (5m) / ❌ auth (2h) / -.
+func pingStatus(r provider.PingResult, ok bool, now time.Time) string {
+	if !ok {
+		return "-"
+	}
+	age := formatAge(now.Sub(r.At))
+	if r.OK {
+		return fmt.Sprintf("✅ %dms (%s)", r.LatencyMS, age)
+	}
+	return fmt.Sprintf("❌ %s (%s)", r.Kind, age)
 }
 
 // formatAge in tuổi cache dạng ngắn: 30s, 5m, 2h.
