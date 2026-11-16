@@ -460,6 +460,39 @@ func TestAddForceVerifyUsesKeptHeaders(t *testing.T) {
 	}
 }
 
+func TestAddForceKeepsHarnessesAndHeaders(t *testing.T) {
+	e := newCLIEnv(t)
+	e.writeRegistry(t, `providers:
+  opencode-go:
+    kind: openai
+    base_url: https://old.example/v1
+    api_key: enc:opencode-go
+    headers:
+      x-opencode-session: 3f2c-uuid
+    harnesses: [opencode, commandcode]
+`)
+
+	code, stdout, stderr := runCLI(t, "",
+		"add", "--name", "opencode-go", "--base-url", "https://new.example/v1",
+		"--api-key-env", "NEW_KEY", "--force", "--skip-verify",
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, muốn 0 (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+
+	reg, err := registry.Load(e.providersPath())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := reg.Providers["opencode-go"]
+	if got := p.Harnesses; len(got) != 2 || got[0] != "opencode" || got[1] != "commandcode" {
+		t.Fatalf("--force làm mất harnesses cũ: %v", p.Harnesses)
+	}
+	if got := p.Headers["x-opencode-session"]; got != "3f2c-uuid" {
+		t.Fatalf("--force làm mất headers cũ: %+v", p.Headers)
+	}
+}
+
 func TestReadLineDoesNotReadAhead(t *testing.T) {
 	r := strings.NewReader("tên\nsk-key\n")
 	if got, _ := readLine(r); got != "tên" {

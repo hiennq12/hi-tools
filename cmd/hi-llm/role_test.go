@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -604,6 +605,77 @@ func TestRolePickFnCancelDoesNotWrite(t *testing.T) {
 	}
 	if string(data) != "implement=opencode:old\n" {
 		t.Fatalf("roles.conf bị sửa khi huỷ: %q", data)
+	}
+}
+
+// fakeFzf cài một `fzf` giả trong PATH với nội dung script cho trước và trả về
+// thư mục chứa nó (dùng cho test gọi thẳng fzfPick).
+func fakeFzf(t *testing.T, script string) string {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "fzf"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatalf("tạo fzf giả: %v", err)
+	}
+	t.Setenv("PATH", bin)
+	return bin
+}
+
+func TestFzfPickReturnsChoice(t *testing.T) {
+	fakeFzf(t, "echo opencode:deeprelay/m1\n")
+
+	got, err := fzfPick("implement> ", []string{"opencode:deeprelay/m1", "opencode:deeprelay/m2"})
+	if err != nil {
+		t.Fatalf("fzfPick: %v", err)
+	}
+	if got != "opencode:deeprelay/m1" {
+		t.Fatalf("fzfPick = %q, muốn opencode:deeprelay/m1", got)
+	}
+}
+
+func TestFzfPickCancelExitCodes(t *testing.T) {
+	for _, code := range []int{1, 130} {
+		t.Run("exit"+strconv.Itoa(code), func(t *testing.T) {
+			fakeFzf(t, "exit "+strconv.Itoa(code)+"\n")
+
+			_, err := fzfPick("implement> ", []string{"opencode:p/m"})
+			if err == nil {
+				t.Fatalf("fzfPick exit %d trả nil error, muốn lỗi huỷ", code)
+			}
+			if !strings.Contains(err.Error(), "huỷ") {
+				t.Fatalf("fzfPick exit %d lỗi = %q, muốn báo đã huỷ", code, err)
+			}
+		})
+	}
+}
+
+func TestFzfPickOtherExitCodeReturnsRealError(t *testing.T) {
+	// fzf thoát với mã lạ (vd 2: lỗi terminal) không phải người dùng huỷ.
+	fakeFzf(t, "exit 2\n")
+
+	_, err := fzfPick("implement> ", []string{"opencode:p/m"})
+	if err == nil {
+		t.Fatal("fzfPick exit 2 trả nil error")
+	}
+	if strings.Contains(err.Error(), "huỷ") {
+		t.Fatalf("fzfPick exit 2 bị coi là đã huỷ: %q", err)
+	}
+	if !strings.Contains(err.Error(), "exit status 2") {
+		t.Fatalf("lỗi fzfPick exit 2 = %q, muốn giữ lỗi thật của fzf (exit status 2)", err)
+	}
+}
+
+func TestFzfPickMissingBinaryReturnsRealError(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // không có fzf
+
+	_, err := fzfPick("implement> ", []string{"opencode:p/m"})
+	if err == nil {
+		t.Fatal("fzfPick không có fzf trả nil error")
+	}
+	if strings.Contains(err.Error(), "huỷ") {
+		t.Fatalf("thiếu fzf bị coi là đã huỷ: %q", err)
+	}
+	if !strings.Contains(err.Error(), "fzf") {
+		t.Fatalf("lỗi = %q, muốn nêu fzf", err)
 	}
 }
 

@@ -1,16 +1,44 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"hi-tools/internal/llm/provider"
 )
+
+// hookWriter là io.Writer an toàn goroutine; hook được gọi ngay trước mỗi lần ghi
+// để test phát hiện việc ghi stderr khi provider khác còn đang ping.
+type hookWriter struct {
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	hook func()
+}
+
+func (w *hookWriter) Write(p []byte) (int, error) {
+	if w.hook != nil {
+		w.hook()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *hookWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
 
 // pingLines trả các dòng của bảng kết quả (bỏ dòng header).
 func pingLines(t *testing.T, stdout string) []string {
@@ -368,5 +396,178 @@ func TestPingDoesNotLeakKey(t *testing.T) {
 	pings := provider.LoadPings(e.cacheDir)
 	if strings.Contains(pings["p"].Error, secret) {
 		t.Fatalf("_ping.json làm lộ api key: %q", pings["p"].Error)
+	}
+}
+
+// --- Kiểm tham số phải xảy ra trước khi xét registry rỗng ---
+
+func TestPingUnknownProviderExit2BeforeEmptyRegistryCheck(t *testing.T) {
+	newCLIEnv(t) // registry rỗng
+
+	code, stdout, stderr := runCLI(t, "", "ping", "khong-co")
+	if code != 2 {
+		t.Fatalf("exit code = %d, muốn 2 với provider lạ ngay cả khi registry rỗng (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "khong-co") {
+		t.Fatalf("lỗi không nêu tên provider lạ: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if strings.Contains(stdout, "hi-llm add") {
+		t.Fatalf("registry rỗng đã in hướng dẫn thay vì báo lỗi tham số: stdout=%q", stdout)
+	}
+}
+
+func TestPingSubscriptionExit2BeforeEmptyRegistryCheck(t *testing.T) {
+	e := newCLIEnv(t)
+	// Chỉ có subscription, không có provider nào.
+	e.writeRegistry(t, `subscriptions:
+  claude:
+    harness: claude
+`)
+
+	code, stdout, stderr := runCLI(t, "", "ping", "claude")
+	if code != 2 {
+		t.Fatalf("exit code = %d, muốn 2 với subscription dù registry không có provider (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "subscription") {
+		t.Fatalf("lỗi không nêu subscription: stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestPingChatWithoutProviderExit2BeforeEmptyRegistryCheck(t *testing.T) {
+	newCLIEnv(t) // registry rỗng
+
+	code, stdout, stderr := runCLI(t, "", "ping", "--chat", "m")
+	if code != 2 {
+		t.Fatalf("exit code = %d, muốn 2 khi --chat không chỉ định provider (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "--chat") {
+		t.Fatalf("lỗi không nêu --chat: stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+// --- Bỏ trùng tên provider trong tham số ---
+
+func TestPingDuplicateNamesPrintOneRow(t *testing.T) {
+	e := newCLIEnv(t)
+
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+	}))
+	defer srv.Close()
+
+	e.writeRegistry(t, `providers:
+  p1:
+    kind: openai
+    base_url: `+srv.URL+`/v1
+    api_key: env:P1_KEY
+`)
+	t.Setenv("P1_KEY", "sk-1")
+
+	code, stdout, stderr := runCLI(t, "", "ping", "p1", "p1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, muốn 0 (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	lines := pingLines(t, stdout)
+	if len(lines) != 1 {
+		t.Fatalf("bảng có %d dòng cho `ping p1 p1`, muốn 1:\n%s", len(lines), stdout)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("ping p1 p1 gửi %d request, muốn 1", got)
+	}
+	if len(provider.LoadPings(e.cacheDir)) != 1 {
+		t.Fatalf("_ping.json = %+v, muốn chỉ có p1", provider.LoadPings(e.cacheDir))
+	}
+}
+
+// --- Không ghi stderr trong goroutine ping ---
+
+// TestPingWritesSaveCacheErrorAfterWait kiểm tra lỗi SaveCache được gom lại và in
+// sau wg.Wait(): khi một provider còn đang ping thì stderr phải chưa có gì.
+func TestPingWritesSaveCacheErrorAfterWait(t *testing.T) {
+	e := newCLIEnv(t)
+
+	fastDone := make(chan struct{})
+	var fastOnce sync.Once
+	fastSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+		fastOnce.Do(func() { close(fastDone) })
+	}))
+	defer fastSrv.Close()
+
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	var slowDone atomic.Bool
+	var once sync.Once
+	slowSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(slowStarted) })
+		<-releaseSlow
+		slowDone.Store(true)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m"}]}`))
+	}))
+	defer slowSrv.Close()
+
+	e.writeRegistry(t, `providers:
+  bad:
+    kind: openai
+    base_url: `+fastSrv.URL+`/v1
+    api_key: env:BAD_KEY
+  slow:
+    kind: openai
+    base_url: `+slowSrv.URL+`/v1
+    api_key: env:SLOW_KEY
+`)
+	t.Setenv("BAD_KEY", "sk-bad")
+	t.Setenv("SLOW_KEY", "sk-slow")
+
+	// HI_LLM_CACHE_DIR là một file thường → SaveCache của provider "bad" luôn lỗi.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("tạo file chặn cache dir: %v", err)
+	}
+	t.Setenv("HI_LLM_CACHE_DIR", blocker)
+
+	var wroteEarly atomic.Bool
+	errOut := &hookWriter{hook: func() {
+		if !slowDone.Load() {
+			wroteEarly.Store(true)
+		}
+	}}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"ping"}, strings.NewReader(""), io.Discard, errOut)
+	}()
+
+	select {
+	case <-slowStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseSlow)
+		t.Fatal("provider slow không được ping (ping không chạy song song?)")
+	}
+	select {
+	case <-fastDone:
+	case <-time.After(5 * time.Second):
+		close(releaseSlow)
+		t.Fatal("provider bad không được ping")
+	}
+
+	// Provider bad đã xong request; cho nó thời gian gọi SaveCache (sẽ lỗi).
+	time.Sleep(500 * time.Millisecond)
+	early := wroteEarly.Load()
+	close(releaseSlow)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ping không kết thúc sau khi provider slow trả lời")
+	}
+
+	if early || wroteEarly.Load() {
+		t.Fatalf("ping ghi stderr trong goroutine khi provider khác còn đang chạy; stderr=%q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "bad") && !strings.Contains(errOut.String(), "cache") {
+		t.Fatalf("lỗi ghi cache của provider bad không được in sau wg.Wait(): stderr=%q", errOut.String())
 	}
 }
