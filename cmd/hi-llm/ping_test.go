@@ -445,6 +445,85 @@ func TestPingChatWithoutProviderExit2BeforeEmptyRegistryCheck(t *testing.T) {
 	}
 }
 
+// --- --chat phải có tên provider ở tham số vị trí ---
+
+// TestPingChatRequiresExplicitProviderName kiểm tra `--chat` chỉ chạy khi người dùng
+// truyền đúng một tên provider ở tham số vị trí. Registry chỉ có một provider cũng
+// không được tự chọn provider đó: phải exit 2 và không gửi request nào.
+func TestPingChatRequiresExplicitProviderName(t *testing.T) {
+	e := newCLIEnv(t)
+
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null}}]}`))
+	}))
+	defer srv.Close()
+
+	e.writeRegistry(t, `providers:
+  only:
+    kind: openai
+    base_url: `+srv.URL+`/v1
+    api_key: env:ONLY_KEY
+`)
+	t.Setenv("ONLY_KEY", "sk-only")
+
+	code, stdout, stderr := runCLI(t, "", "ping", "--chat", "m")
+	if code != 2 {
+		t.Fatalf("exit code = %d, muốn 2 khi --chat không có tên provider dù registry chỉ có 1 provider (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("--chat không có tên provider vẫn gửi %d request", got)
+	}
+	if !strings.Contains(stdout+stderr, "--chat") {
+		t.Fatalf("lỗi không nêu --chat: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if pings := provider.LoadPings(e.cacheDir); len(pings) != 0 {
+		t.Fatalf("_ping.json có dữ liệu dù không ping: %+v", pings)
+	}
+}
+
+// TestPingChatDuplicateNameStillSingleProvider kiểm tra sau khi bỏ trùng tên,
+// `ping p1 p1 --chat m` vẫn còn đúng một provider nên chạy bình thường.
+func TestPingChatDuplicateNameStillSingleProvider(t *testing.T) {
+	e := newCLIEnv(t)
+
+	var calls int32
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		gotModel, _ = payload["model"].(string)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null}}]}`))
+	}))
+	defer srv.Close()
+
+	e.writeRegistry(t, `providers:
+  p1:
+    kind: openai
+    base_url: `+srv.URL+`/v1
+    api_key: env:P1_KEY
+`)
+	t.Setenv("P1_KEY", "sk-1")
+
+	code, stdout, stderr := runCLI(t, "", "ping", "p1", "p1", "--chat", "m")
+	if code != 0 {
+		t.Fatalf("exit code = %d, muốn 0 với `ping p1 p1 --chat m` (stdout=%q stderr=%q)", code, stdout, stderr)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("`ping p1 p1 --chat m` gửi %d request, muốn 1", got)
+	}
+	if gotModel != "m" {
+		t.Fatalf("body.model = %q, muốn m", gotModel)
+	}
+	lines := pingLines(t, stdout)
+	if len(lines) != 1 || !strings.Contains(lines[0], "✅") || !strings.Contains(lines[0], "chat ok") {
+		t.Fatalf("bảng = %q, muốn một dòng ✅ chat ok", stdout)
+	}
+}
+
 // --- Bỏ trùng tên provider trong tham số ---
 
 func TestPingDuplicateNamesPrintOneRow(t *testing.T) {
