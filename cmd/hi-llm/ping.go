@@ -69,7 +69,7 @@ func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	sort.Strings(names)
-	if chatModel != "" && len(names) != 1 {
+	if chatModel != "" && (len(pos) == 0 || len(names) != 1) {
 		fmt.Fprintln(stderr, "hi-llm ping: --chat chỉ dùng khi chỉ định đúng một provider")
 		return 2
 	}
