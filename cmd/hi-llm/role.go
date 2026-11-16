@@ -259,7 +259,7 @@ func fzfPick(prompt string, cands []string) (string, error) {
 				return "", errors.New("đã huỷ")
 			}
 		}
-		return "", errors.New("đã huỷ")
+		return "", fmt.Errorf("fzf: %w", err)
 	}
 	sel := strings.TrimSpace(string(out))
 	if sel == "" {

@@ -179,9 +179,12 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Ghi đè chỉ thay thông tin kết nối; header/harness sửa tay được giữ nguyên.
 	var keptHeaders map[string]string
+	var keptHarnesses []string
 	if existed {
 		keptHeaders = old.Headers
+		keptHarnesses = old.Harnesses
 	}
 
 	if !skipVerify {
@@ -223,7 +226,13 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if reg.Providers == nil {
 		reg.Providers = map[string]registry.Provider{}
 	}
-	reg.Providers[name] = registry.Provider{Kind: kind, BaseURL: baseURL, APIKey: pointer, Headers: keptHeaders}
+	reg.Providers[name] = registry.Provider{
+		Kind:      kind,
+		BaseURL:   baseURL,
+		APIKey:    pointer,
+		Headers:   keptHeaders,
+		Harnesses: keptHarnesses,
+	}
 	if err := reg.Validate(); err != nil {
 		fmt.Fprintf(stderr, "hi-llm add: %v\n", err)
 		return 1

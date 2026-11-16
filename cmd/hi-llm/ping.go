@@ -17,8 +17,9 @@ import (
 
 // pingOutcome là kết quả một provider trong một lần chạy ping.
 type pingOutcome struct {
-	result provider.PingResult
-	models []string
+	result   provider.PingResult
+	models   []string
+	cacheErr error
 }
 
 func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -43,17 +44,13 @@ func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "hi-llm ping: %v\n", err)
 		return 1
 	}
-	if len(reg.Providers) == 0 {
-		fmt.Fprintln(stdout, "Chưa có provider nào. Chạy `hi-llm add` để thêm provider đầu tiên.")
-		return 0
-	}
-
+	// Kiểm tham số trước khi xét registry rỗng: tên lạ/subscription luôn là lỗi 2.
+	seen := map[string]bool{}
 	var names []string
 	if len(pos) == 0 {
 		for name := range reg.Providers {
 			names = append(names, name)
 		}
-		sort.Strings(names)
 	} else {
 		for _, name := range pos {
 			if reg.IsSubscription(name) {
@@ -64,13 +61,21 @@ func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "hi-llm ping: không có provider %q\n", name)
 				return 2
 			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
 		}
-		names = pos
 	}
 	sort.Strings(names)
-	if chatModel != "" && len(pos) != 1 {
+	if chatModel != "" && len(names) != 1 {
 		fmt.Fprintln(stderr, "hi-llm ping: --chat chỉ dùng khi chỉ định đúng một provider")
 		return 2
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(stdout, "Chưa có provider nào. Chạy `hi-llm add` để thêm provider đầu tiên.")
+		return 0
 	}
 
 	cacheDir, err := provider.CacheDir()
@@ -141,12 +146,10 @@ func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				} else {
 					out.result.OK = true
 					out.models = models
-					if serr := provider.SaveCache(cacheDir, name, &provider.Cache{
+					out.cacheErr = provider.SaveCache(cacheDir, name, &provider.Cache{
 						FetchedAt: time.Now(),
 						Models:    models,
-					}); serr != nil {
-						fmt.Fprintf(stderr, "hi-llm ping: ghi cache %s: %v\n", name, serr)
-					}
+					})
 				}
 			}
 
@@ -156,6 +159,13 @@ func runPing(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}()
 	}
 	wg.Wait()
+
+	// Mọi lỗi (kể cả ghi cache) chỉ in sau khi các goroutine đã xong.
+	for _, name := range names {
+		if err := outcomes[name].cacheErr; err != nil {
+			fmt.Fprintf(stderr, "hi-llm ping: ghi cache %s: %v\n", name, err)
+		}
+	}
 
 	results := make(map[string]provider.PingResult, len(outcomes))
 	tbl := hix.NewTable("NAME", "STATUS", "LATENCY", "DETAIL")
